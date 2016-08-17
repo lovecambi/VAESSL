@@ -77,6 +77,7 @@ class TrainModel(Train):
 
         if self.custom_eval_func is not None:
             self.custom_eval_func(self.model, paths.get_custom_eval_path(0, self.model.root_path))
+            self.write_to_logger("Current output should be result without any training.")
         
         self.train_mode = train_mode
         self._srng = np.random.RandomState(np.random.randint(1,2147462579))
