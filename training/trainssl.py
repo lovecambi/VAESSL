@@ -77,6 +77,7 @@ class TrainModel(Train):
 
         if self.custom_eval_func is not None:
             self.custom_eval_func(self.model, paths.get_custom_eval_path(0, self.model.root_path))
+            self.write_to_logger("Current output should be result without any training.")
         
         self.train_mode = train_mode
         self._srng = np.random.RandomState(np.random.randint(1,2147462579))
@@ -101,6 +102,11 @@ class TrainModel(Train):
                     batch_x_u, batch_x_l, batch_t_l = batch
                     train_output = f_train(batch_x_u, batch_x_l, batch_t_l, *train_args['inputs'].values())
                     train_outputs.append(train_output)
+                    
+                    # for observing performance only
+                    #if self.custom_eval_func is not None:
+                    #    self.custom_eval_func(self.model, paths.get_custom_eval_path(0, self.model.root_path))
+
             elif self.train_mode == 'SL':
                 for batch in self.iterate_minibatches_u(train_dataset, batch_size, shuffle=True):
                     batch_x, batch_t = batch
