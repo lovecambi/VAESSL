@@ -59,20 +59,6 @@ def run_vae_mnist(n_epochs=10):
                       warmup=[("kl_warmup", init_kl_wu, 1., 100)] # if using linear warm-up training, parameter warmup should be initilized as 0                  
                       )
 
-# Evaluate the approximated classification error with K MC samples for a good estimate
-def M2_custom_evaluation(model, path, K=10):
-    mean_evals = []
-    for k in xrange(K):
-	eps = np.random.standard_normal(size=test_dataset[0].shape)
-        cur_data = test_dataset[0] + np.exp(0.5*test_dataset[1]) * eps  
-        mean_eval = model.get_output(cur_data)
-        mean_evals.append(mean_eval)
-    results = np.mean(np.asarray(mean_evals), axis=0)
-    t_class = np.argmax(test_dataset[2], axis=1)
-    y_class = np.argmax(results, axis=1)
-    missclass = (np.sum(y_class != t_class, dtype='float32') / len(y_class)) * 100.
-    train.write_to_logger("test %d-samples: %0.2f%%." % (K, missclass))
-
 
 def run_vaessl_mnist(n_epochs=20):
     """
@@ -139,6 +125,20 @@ def run_M1M2_mnist(n_epochs=20):
     train_args['inputs']['beta1'] = 0.9
     train_args['inputs']['beta2'] = 0.999
     train_args['inputs']['samples'] = 1
+    
+    # Evaluate the approximated classification error with K MC samples for a good estimate
+    def M1M2_custom_evaluation(model, path, K=10):
+    	mean_evals = []
+    	for k in xrange(K):
+	    eps = np.random.standard_normal(size=test_dataset[0].shape)
+            cur_data = test_dataset[0] + np.exp(0.5*test_dataset[1]) * eps  
+            mean_eval = model.get_output(cur_data)
+            mean_evals.append(mean_eval)
+        results = np.mean(np.asarray(mean_evals), axis=0)
+    	t_class = np.argmax(test_dataset[2], axis=1)
+    	y_class = np.argmax(results, axis=1)
+    	missclass = (np.sum(y_class != t_class, dtype='float32') / len(y_class)) * 100.
+    	train.write_to_logger("test %d-samples: %0.2f%%." % (K, missclass))
 
     # Define training loop. Output training evaluations every 1 epoch
     # and the custom evaluation method every 10 epochs.
