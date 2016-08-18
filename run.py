@@ -9,7 +9,7 @@ import os
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 import theano
-from training.trainssl import TrainModel, TrainM2onM1
+from training.trainssl import TrainModel, TrainGaussian
 from lasagne_extensions.nonlinearities import rectify
 from data_loaders import mnist
 from models.sdgmssl import SDGMSSL
@@ -29,8 +29,6 @@ def run_vae_mnist(n_epochs=10):
     
     n, n_x = train_dataset[0].shape    # Datapoints in the dataset, input features.
     bs = 100                           # The batchsize.
-    n_ts_batches = test_dataset[0].shape[0]/bs
-    n_vl_batches = validation_dataset[0].shape[0]/bs
     init_kl_wu = 0.
     
     model = VAE_Z_X(n_x=n_x, n_z=64, qz_hid=[512, 512], px_hid=[512, 512],
@@ -48,30 +46,17 @@ def run_vae_mnist(n_epochs=10):
     # Define training loop. Output training evaluations every 1 epoch
     train = TrainModel(model=model, output_freq=1)
     train.add_initial_training_notes("Training the VAE model with bn %s. seed %i." % (str(model.batchnorm), seed))
-    train.train_model(f_train, train_args, f_validate, validate_args,
+    train_mode = 'USL'
+    train.train_model(f_train, train_args, f_validate, validate_args, train_mode, 
                       train_dataset[0], validation_dataset[0], test_dataset[0],
                       train_labeled=None, # labeled training data if appyling Semi-supervised training
                       batch_size=bs, 
-                      n_valid_batches=n_vl_batches, 
-                      n_test_batches=n_ts_batches, 
+                      eval_valid_batch=True, 
+                      eval_test_batch=True, 
                       n_epochs=n_epochs,
                       anneal=[("learningrate", 1, 0.95, 3e-5)], # exp annealing training with a tuple of (var_name, every, scale constant, minimum value).
                       warmup=[("kl_warmup", init_kl_wu, 1., 100)] # if using linear warm-up training, parameter warmup should be initilized as 0                  
                       )
-
-# Evaluate the approximated classification error with K MC samples for a good estimate
-def M2_custom_evaluation(model, path, K=10):
-    mean_evals = []
-    for k in xrange(K):
-	eps = np.random.standard_normal(size=test_dataset[0].shape)
-        cur_data = test_dataset[0] + np.exp(0.5*test_dataset[1]) * eps  
-        mean_eval = model.get_output(cur_data)
-        mean_evals.append(mean_eval)
-    results = np.mean(np.asarray(mean_evals), axis=0)
-    t_class = np.argmax(test_dataset[2], axis=1)
-    y_class = np.argmax(results, axis=1)
-    missclass = (np.sum(y_class != t_class, dtype='float32') / len(y_class)) * 100.
-    train.write_to_logger("test %d-samples: %0.2f%%." % (K, missclass))
 
 
 def run_vaessl_mnist(n_epochs=20):
@@ -83,8 +68,6 @@ def run_vaessl_mnist(n_epochs=20):
 
     n, n_x = train_dataset[0].shape
     bs = 100
-#    n_ts_batches = test_dataset[0].shape[0]/bs
-    n_vl_batches = validation_dataset[0].shape[0]/bs
 #    init_kl_wu = 1.
 
     # Initialize the semi deep generative model.
@@ -105,52 +88,13 @@ def run_vaessl_mnist(n_epochs=20):
     train = TrainModel(model=model, output_freq=1)
     train.add_initial_training_notes("Training the semi-supervised VAE with %i labels. bn %s. seed %i." % (
                                     n_labeled, str(model.batchnorm), seed))
-    train.train_model(f_train, train_args, f_validate, validate_args,
+    train_mode = 'SSL'
+    train.train_model(f_train, train_args, f_validate, validate_args, train_mode,
                       train_dataset[0], validation_dataset, None,
 		      train_labeled, # labeled training data if appyling Semi-supervised training
                       batch_size=100, 
-                      n_valid_batches=n_vl_batches, 
-                      n_test_batches=1, 
-                      n_epochs=n_epochs,
-                      anneal=[("learningrate", 200, 0.75, 3e-5)],
-#                      warmup=[("kl_warmup", init_kl_wu, 1., 100)]
-                      )
-
-def run_M1M2_mnist(n_epochs=20):
-    """
-    M1: VAE_Z_X
-    M2: VAE_YZ_X
-    This model requires unsupervised VAE training first to obtain latent features, mean and logvar.
-    Thus, the data feed to the VAESSL has the format: (mean, logvar, target)
-    """
-
-    # TODO, load data from M1 results
-
-    
-    # Initialize the semi deep generative model.
-    model = VAE_YZ_X(n_x=n_x, n_z=100, n_y=10, qz_hid=[500, 500], qy_hid=[500, 500], px_hid=[500, 500],
-                    nonlinearity=rectify, batchnorm=True, x_dist='gaussian')
-
-    # Get the training functions.
-    f_train, f_validate, train_args, validate_args = model.build_model(n, n_labeled)
-    # Update the default function arguments.
-    train_args['inputs']['beta'] = .1
-    train_args['inputs']['learningrate'] = 3e-4
-    train_args['inputs']['beta1'] = 0.9
-    train_args['inputs']['beta2'] = 0.999
-    train_args['inputs']['samples'] = 1
-
-    # Define training loop. Output training evaluations every 1 epoch
-    # and the custom evaluation method every 10 epochs.
-    train = TrainModel(model=model, output_freq=1)
-    train.add_initial_training_notes("Training the semi-supervised VAE with %i labels. bn %s. seed %i." % (
-                                    n_labeled, str(model.batchnorm), seed))
-    train.train_model(f_train, train_args, f_validate, validate_args,
-                      train_dataset[0:2], validation_dataset, None,
-		      train_labeled, # labeled training data if appyling Semi-supervised training
-                      batch_size=100, 
-                      n_valid_batches=n_vl_batches, 
-                      n_test_batches=1, 
+                      eval_valid_batch=True, 
+                      eval_test_batch=True, 
                       n_epochs=n_epochs,
                       anneal=[("learningrate", 200, 0.75, 3e-5)],
 #                      warmup=[("kl_warmup", init_kl_wu, 1., 100)]
@@ -166,8 +110,6 @@ def run_sdgmssl_mnist(n_epochs=3):
 
     n, n_x = train_dataset[0].shape
     bs = 100
-    n_ts_batches = test_dataset[0].shape[0]/bs
-    n_vl_batches = validation_dataset[0].shape[0]/bs
 #    init_kl_wu = 1.
 
     # Initialize the semi deep generative model.
@@ -190,23 +132,81 @@ def run_sdgmssl_mnist(n_epochs=3):
     train = TrainModel(model=model, output_freq=1)
     train.add_initial_training_notes("Training the semi-supervised VAE with %i labels. bn %s. seed %i." % (
                                     n_labeled, str(model.batchnorm), seed))
-    train.train_model(f_train, train_args, f_validate, validate_args,
+    train_mode = 'SSL'
+    train.train_model(f_train, train_args, f_validate, validate_args, train_mode,
                       train_dataset[0], validation_dataset, test_dataset,
 		      train_labeled, # labeled training data if appyling Semi-supervised training
                       batch_size=100, 
-                      n_valid_batches=n_vl_batches, 
-                      n_test_batches=1, 
+                      eval_valid_batch=True, 
+                      eval_test_batch=False, 
+                      n_epochs=n_epochs,
+                      anneal=[("learningrate", 200, 0.75, 3e-5)],
+#                      warmup=[("kl_warmup", init_kl_wu, 1., 100)]
+                      )
+
+
+def run_M1M2_mnist(n_epochs=20):
+    """
+    M1: VAE_Z_X
+    M2: VAE_YZ_X
+    This model requires unsupervised VAE training first to obtain latent features, mean and logvar.
+    Thus, the data feed to the VAESSL has the format: (mean, logvar, target)
+    """
+
+    # TODO, load data from M1 results (latent variable)
+
+    
+    # Initialize the semi deep generative model.
+    model = VAE_YZ_X(n_x=n_x, n_z=100, n_y=10, qz_hid=[500, 500], qy_hid=[500, 500], px_hid=[500, 500],
+                    nonlinearity=rectify, batchnorm=True, x_dist='gaussian')
+
+    # Get the training functions.
+    f_train, f_validate, train_args, validate_args = model.build_model(n, n_labeled)
+    # Update the default function arguments.
+    train_args['inputs']['beta'] = .1
+    train_args['inputs']['learningrate'] = 3e-4
+    train_args['inputs']['beta1'] = 0.9
+    train_args['inputs']['beta2'] = 0.999
+    train_args['inputs']['samples'] = 1
+
+
+    # Evaluate the approximated classification error with K MC samples for a good estimate
+    def M1M2_custom_evaluation(model, path, K=10):
+        mean_evals = []
+        for k in xrange(K):
+   	    eps = np.random.standard_normal(size=test_dataset[0].shape)
+            cur_data = test_dataset[0] + np.exp(0.5*test_dataset[1]) * eps  
+            mean_eval = model.get_output(cur_data)
+            mean_evals.append(mean_eval)
+        results = np.mean(np.asarray(mean_evals), axis=0)
+        t_class = np.argmax(test_dataset[2], axis=1)
+        y_class = np.argmax(results, axis=1)
+        missclass = (np.sum(y_class != t_class, dtype='float32') / len(y_class)) * 100.
+        train.write_to_logger("test %d-samples: %0.2f%%." % (K, missclass))
+
+    # Define training loop. Output training evaluations every 1 epoch
+    # and the custom evaluation method every 10 epochs.
+    train = TrainGaussian(model=model, output_freq=1)
+    train.add_initial_training_notes("Training the semi-supervised VAE with %i labels. bn %s. seed %i." % (
+                                    n_labeled, str(model.batchnorm), seed))
+    train_mode = 'SSL'
+    train.train_model(f_train, train_args, f_validate, validate_args, train_mode, 
+                      train_dataset[0:2], validation_dataset, None,
+		      train_labeled, # labeled training data if appyling Semi-supervised training
+                      batch_size=100, 
+                      eval_valid_batch=True, 
+                      eval_test_batch=False, 
                       n_epochs=n_epochs,
                       anneal=[("learningrate", 200, 0.75, 3e-5)],
 #                      warmup=[("kl_warmup", init_kl_wu, 1., 100)]
                       )
 
 if __name__ == "__main__":
-    run_vae_mnist()
+    #run_vae_mnist()
     #run_vaessl_mnist()
+    run_sdgmssl_mnist()
 
-    # TODO: test M2_custom_evaluation
+    # TODO: test M1M2_custom_evaluation, TrainGaussian Class and run_M1M2_mnist()
     #run_M1M2_mnist() # need test
-    #run_sdgmssl_mnist()
 
     
