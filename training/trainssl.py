@@ -157,7 +157,7 @@ class TrainModel(Train):
                 else:
                     if self.train_mode == 'USL':
                         f_validate(validation_dataset, *validation_args['inputs'].values())
-                    elif self.train_mode == 'SSL' or 'SL':
+                    elif self.train_mode == 'SSL' or self.train_mode == 'SL':
                         self.eval_validation[epoch] = f_validate(validation_dataset[0], validation_dataset[1], *validation_args['inputs'].values())
                     else:
                         raise NotImplementedError
